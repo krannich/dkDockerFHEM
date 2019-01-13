@@ -1,0 +1,101 @@
+version: '3'
+
+services:
+    
+    ## GENERAL
+    portainer:
+        restart: always
+        image: portainer/portainer:latest
+        command: -H unix:///var/run/docker.sock --no-auth
+        ports:
+            - "9000:9000"
+        environment:
+            - REGISTRY_HTTP_TLS_CERTIFICATE=/certs/portainer.crt
+            - REGISTRY_HTTP_TLS_KEY=/certs/portainer.key
+        volumes:
+            - /var/run/docker.sock:/var/run/docker.sock
+            - portainer_data:/data
+            - /home/pirate/certs/portainer.key:/certs/portainer.key
+            - /home/pirate/certs/portainer.crt:/certs/portainer.crt
+        networks:
+            - fhem-network
+    
+    adminer:
+        image: adminer
+        restart: always
+        ports:
+            - 8080:8080
+        networks:
+            - fhem-network
+            
+    reverseproxy:
+        restart: always
+        image: nginx:latest
+        volumes:
+            - ./reverseproxy/conf/nginx.conf:/etc/nginx/nginx.conf
+        ports:
+            - 80:80
+            #- 443:443
+            - 8088:8088
+        networks:
+            - fhem-network
+        depends_on:
+            - "fhem"    
+            
+    ## FHEM
+    fhem:
+        restart: always
+        expose:
+            - "8088"
+        ports:
+            - "8083:8083"
+            - "7072:7072"
+        build: ./fhem
+        privileged: true
+        devices:
+            - "/dev/ttyAMA0:/dev/ttyAMA0"
+            #- "/dev/ttyUSB0:/dev/ttyUSB0"
+        volumes:
+            - ./fhem/core/:/opt/fhem/
+            - /etc/localtime:/etc/localtime:ro
+            - /sys/class/gpio:/sys/class/gpio
+            #- /dev/serial/by-id:/dev/serial/by-id
+        entrypoint:
+            - /opt/fhem/start-fhem.sh
+        networks:
+            - fhem-network
+    
+    ## SERVICES
+    mariadb:
+        restart: always
+        build: ./mariadb
+        environment:
+            MYSQL_ROOT_PASSWORD: fhem1234
+        ports:
+            - "3306:3306"
+        volumes:
+            - ./mariadb/data:/var/lib/mysql
+            - ./mariadb/files/init.sql:/docker-entrypoint-initdb.d/fhem-init.sql
+        networks:
+            - fhem-network
+            
+    alexa:
+        restart: always
+        ports:
+            - "3000:3000"
+        build: ./alexa
+        volumes:
+            - ./alexa/config/config.json:/alexa-fhem/config.json
+            - ./alexa/config/cert.pem:/root/.alexa/cert.pem
+            - ./alexa/config/key.pem:/root/.alexa/key.pem
+        networks:
+            - fhem-network
+        depends_on:
+            - "fhem"
+    
+volumes:
+    portainer_data:
+        
+networks:
+    fhem-network:
+        driver: bridge
